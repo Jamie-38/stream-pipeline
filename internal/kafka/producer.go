@@ -7,24 +7,21 @@ import (
 	"github.com/segmentio/kafka-go"
 )
 
-func KafkaProducer() {
-	w := &kafka.Writer{
-		Addr:     kafka.TCP("localhost:9092"),
-		Topic:    "topic-A",
-		Balancer: &kafka.LeastBytes{},
-	}
+func KafkaProducer(ctx context.Context, writer *kafka.Writer, readerCh <-chan string) {
+	for {
+		select {
+		case line := <-readerCh:
+			err := writer.WriteMessages(ctx, kafka.Message{
+				Key:   []byte("raw"),
+				Value: []byte(line),
+			})
+			if err != nil {
+				log.Println("kafka write error:", err)
+				// optionally continue / backoff depending on policy
+			}
 
-	err := w.WriteMessages(context.Background(),
-		kafka.Message{
-			Key:   []byte("Key-A"),
-			Value: []byte("Hello World!"),
-		},
-	)
-	if err != nil {
-		log.Fatal("failed to write messages:", err)
-	}
-
-	if err := w.Close(); err != nil {
-		log.Fatal("failed to close writer:", err)
+		case <-ctx.Done():
+			return
+		}
 	}
 }

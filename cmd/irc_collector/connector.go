@@ -19,7 +19,5 @@ func TwitchWebsocket(token string, username string) (*websocket.Conn, error) {
 	conn.WriteMessage(websocket.TextMessage, []byte(msg))
 	nick := fmt.Sprintf("NICK %s\r\n", username)
 	conn.WriteMessage(websocket.TextMessage, []byte(nick))
-	// conn.WriteMessage(websocket.TextMessage, []byte("JOIN #hasanabi\r\n"))
-
 	return conn, nil
 }

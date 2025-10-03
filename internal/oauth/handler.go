@@ -56,7 +56,6 @@ func Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// fmt.Fprintf(w, "Access Token: %s", tokenData.AccessToken)
 	fmt.Fprintf(w, "%+v\n", tokenData)
 
 	f, err := os.Create(fmt.Sprintf("tokens/%s.token.json", "default"))
