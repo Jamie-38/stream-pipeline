@@ -9,6 +9,7 @@ import (
 
 	"github.com/Jamie-38/stream-pipeline/internal/config"
 	"github.com/Jamie-38/stream-pipeline/internal/httpapi"
+	ircevents "github.com/Jamie-38/stream-pipeline/internal/irc_events"
 	kstream "github.com/Jamie-38/stream-pipeline/internal/kafka"
 	"github.com/Jamie-38/stream-pipeline/internal/oauth"
 	"github.com/Jamie-38/stream-pipeline/internal/scheduler"
@@ -33,33 +34,40 @@ func main() {
 	writerCh := make(chan string, 100)
 	readerCh := make(chan string, 1000)
 
-	// start http api_controller - go
-	go httpapi.New_http_controller(controlCh)
+	parseCh := make(chan ircevents.Event, 1000)
+
+	errCh := make(chan error, 1)
 
 	// process control channel
 	go scheduler.Control_scheduler(ctx, controlCh, writerCh)
 
 	// dial
-	conn, err := TwitchWebsocket(token.AccessToken, account.Name)
+	conn, err := TwitchWebsocket(ctx, token.AccessToken, account.Name, os.Getenv("TWITCH_IRC_URI"))
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer conn.Close()
 
-	// start writer
-	go IRCWriter(ctx, conn, writerCh)
+	go func() { errCh <- httpapi.Run(ctx, controlCh) }()
 
-	// start reader
-	go StartReader(ctx, conn, writerCh, readerCh)
+	go func() { errCh <- StartReader(ctx, conn, writerCh, readerCh) }()
 
-	// print irc stream - TEST
-	// go print_reader(readerCh)
+	go func() { errCh <- IRCWriter(ctx, conn, writerCh) }()
+
+	// start  irc writer
+	// go IRCWriter(ctx, conn, writerCh)
+
+	// start irc reader
+	// go StartReader(ctx, conn, writerCh, readerCh)
+
+	// parse readerCh
+	go Classify_line(ctx, readerCh, parseCh)
 
 	// kafka producer
-	w := kstream.New_Writer()
+	w := kstream.NewWriter()
 	defer w.Close()
 
-	go kstream.KafkaProducer(ctx, w, readerCh)
+	go kstream.KafkaProducer(ctx, w, parseCh)
 
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
