@@ -3,25 +3,27 @@ package oauth
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/Jamie-38/stream-pipeline/internal/types"
 )
 
-func LoadTokenJSON() types.Token {
-	jsonFile, err := os.Open("tokens/default.token.json")
+func LoadTokenJSON(path string) (types.Token, error) {
+	var tok types.Token
+
+	f, err := os.Open(path)
 	if err != nil {
-		fmt.Println(err)
+		return tok, fmt.Errorf("open token file %q: %w", path, err)
 	}
-	fmt.Println("Opened Token JSON")
-	fmt.Printf("%s", jsonFile.Name())
-	defer jsonFile.Close()
+	defer f.Close()
 
-	byteValue, _ := io.ReadAll(jsonFile)
+	if err := json.NewDecoder(f).Decode(&tok); err != nil {
+		return tok, fmt.Errorf("decode token json %q: %w", path, err)
+	}
 
-	var token types.Token
-	json.Unmarshal(byteValue, &token)
-
-	return token
+	// Minimal validation: presence and scope sanity (optional, tweak as needed).
+	if tok.AccessToken == "" {
+		return tok, fmt.Errorf("token %q missing access_token", path)
+	}
+	return tok, nil
 }

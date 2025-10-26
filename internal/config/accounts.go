@@ -3,25 +3,28 @@ package config
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/Jamie-38/stream-pipeline/internal/types"
 )
 
-func LoadAccount() types.Account {
-	jsonFile, err := os.Open("accounts/percy.config.json")
+func LoadAccount(path string) (types.Account, error) {
+	var acc types.Account
+
+	f, err := os.Open(path)
 	if err != nil {
-		fmt.Println(err)
+		return acc, fmt.Errorf("open account file %q: %w", path, err)
 	}
-	fmt.Println("Opened Account JSON")
-	fmt.Printf("%s", jsonFile.Name())
-	defer jsonFile.Close()
+	defer f.Close()
 
-	byteValue, _ := io.ReadAll(jsonFile)
+	dec := json.NewDecoder(f)
+	if err := dec.Decode(&acc); err != nil {
+		return acc, fmt.Errorf("decode account json %q: %w", path, err)
+	}
 
-	var account types.Account
-	json.Unmarshal(byteValue, &account)
-
-	return account
+	// Minimal validation to catch empty/misnamed fields early.
+	if acc.Name == "" {
+		return acc, fmt.Errorf("account %q missing required field: username/name", path)
+	}
+	return acc, nil
 }

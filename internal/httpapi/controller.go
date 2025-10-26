@@ -2,10 +2,12 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,30 +25,32 @@ func (api *APIController) Join(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Queued join for channel: " + ch))
 }
 
-// func NewHTTPController(controlCh chan types.IRCCommand) {
-// 	api := &APIController{ControlCh: controlCh}
-// 	mux := http.NewServeMux()
-// 	mux.HandleFunc("/join", api.Join)
-
-// 	host := os.Getenv("HTTP_API_HOST")
-// 	port := os.Getenv("HTTP_API_PORT")
-// 	address := net.JoinHostPort(host, port)
-
-// 	log.Printf("http_api server listening on :%s", address)
-// 	if err := http.ListenAndServe(address, mux); err != nil {
-// 		log.Fatal(err)
-// 	}
-// }
-
 func Run(ctx context.Context, controlCh chan types.IRCCommand) error {
 	api := &APIController{ControlCh: controlCh}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/join", api.Join)
 
-	host := os.Getenv("HTTP_API_HOST")
-	port := os.Getenv("HTTP_API_PORT")
-	address := net.JoinHostPort(host, port)
+	hostEnv := os.Getenv("HTTP_API_HOST")
+	host := strings.TrimSpace(hostEnv)
+	if host == "" {
+		return fmt.Errorf("HTTP_API_HOST missing")
+	}
+
+	portEnv := os.Getenv("HTTP_API_PORT")
+	portString := strings.TrimSpace(portEnv)
+	if portString == "" {
+		return fmt.Errorf("HTTP_API_PORT missing")
+	}
+	port, err := strconv.Atoi(portEnv)
+	if err != nil {
+		return fmt.Errorf("HTTP_API_PORT parse error")
+	}
+	if port <= 1 || port >= 65535 {
+		return fmt.Errorf("HTTP_API_PORT out of bounds")
+	}
+
+	address := net.JoinHostPort(host, portEnv)
 
 	srv := &http.Server{
 		Addr:              address,
