@@ -1,6 +1,7 @@
 module github.com/Jamie-38/stream-pipeline
 
-go 1.24.4
+go 1.24.0           // language level
+toolchain go1.24.4  // compiler version
 
 require github.com/joho/godotenv v1.5.1
 

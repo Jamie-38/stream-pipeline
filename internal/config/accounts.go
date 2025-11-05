@@ -23,7 +23,7 @@ func LoadAccount(path string) (types.Account, error) {
 	}
 
 	// Minimal validation to catch empty/misnamed fields early.
-	if acc.Name == "" {
+	if acc.User == "" {
 		return acc, fmt.Errorf("account %q missing required field: username/name", path)
 	}
 	return acc, nil

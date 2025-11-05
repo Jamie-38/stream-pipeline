@@ -1,5 +1,6 @@
 package types
 
 type Account struct {
-	Name string `json:"username"`
+	User string `json:"accountname"`
+	Nick string `json:"username"`
 }

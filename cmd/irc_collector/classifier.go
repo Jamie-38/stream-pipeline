@@ -6,9 +6,10 @@ import (
 	"strings"
 
 	ircevents "github.com/Jamie-38/stream-pipeline/internal/irc_events"
+	"github.com/Jamie-38/stream-pipeline/internal/types"
 )
 
-func Classify_line(ctx context.Context, readerCh <-chan string, parseCh chan<- ircevents.Event) {
+func Classify_line(ctx context.Context, readerCh <-chan string, parseCh chan<- ircevents.Event, membershipCh chan<- types.MembershipEvent, username string) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -118,21 +119,42 @@ func Classify_line(ctx context.Context, readerCh <-chan string, parseCh chan<- i
 				}
 
 			case "JOIN", "PART":
-				// channel is params[0], user in prefix
 				if len(params) == 0 {
 					fmt.Println("skip: malformed", command, "(missing channel)")
 					continue
 				}
-				channel := params[0]
-				userLogin := loginFromPrefix(prefix)
-				fmt.Println(command, ": channel=", channel, "user=", userLogin)
 
-				// Later: emit JoinPart event via parseCh.
+				userLogin := strings.ToLower(loginFromPrefix(prefix))
+				if userLogin == "" {
+					// no prefix → can’t attribute; ignore
+					continue
+				}
+
+				// own JOIN/PART as membership confirmations
+				if userLogin != username {
+					continue
+				}
+
+				ch := strings.ToLower(params[0])
+				if !strings.HasPrefix(ch, "#") {
+					ch = "#" + ch
+				}
+
+				// emit membership signal
+				evt := types.MembershipEvent{
+					Op:      command, // "JOIN" or "PART"
+					Channel: ch,
+				}
+				select {
+				case membershipCh <- evt:
+				case <-ctx.Done():
+					return
+				default:
+					// drop if full; rectifier will reconcile on next tick/timeout
+				}
 
 			default:
-				// For now we just log others (USERNOTICE, ROOMSTATE, numerics, etc.)
-				// You can add handlers incrementally.
-				// fmt.Println("ignore:", command)
+				// USERNOTICE, ROOMSTATE, numerics, etc
 			}
 		}
 	}
