@@ -5,9 +5,12 @@ import (
 	"strings"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/Jamie-38/stream-pipeline/internal/observe"
 )
 
 func StartReader(ctx context.Context, conn *websocket.Conn, writerCh chan<- string, readCh chan<- string) error {
+	lg := observe.C("reader")
 	for {
 		select {
 		case <-ctx.Done():
@@ -15,6 +18,7 @@ func StartReader(ctx context.Context, conn *websocket.Conn, writerCh chan<- stri
 		default:
 			_, payload, err := conn.ReadMessage()
 			if err != nil {
+				lg.Warn("socket read failed", "err", err)
 				return err
 			}
 			for _, line := range strings.Split(string(payload), "\r\n") {

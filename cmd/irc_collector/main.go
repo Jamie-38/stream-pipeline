@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	ircevents "github.com/Jamie-38/stream-pipeline/internal/irc_events"
 	kstream "github.com/Jamie-38/stream-pipeline/internal/kafka"
 	"github.com/Jamie-38/stream-pipeline/internal/oauth"
+	"github.com/Jamie-38/stream-pipeline/internal/observe"
 	"github.com/Jamie-38/stream-pipeline/internal/scheduler"
 	"github.com/Jamie-38/stream-pipeline/internal/types"
 )
@@ -23,15 +23,19 @@ import (
 func main() {
 	config.LoadEnv()
 
+	lg := observe.C("irc_collector")
+
 	account, err := config.LoadAccount(os.Getenv("ACCOUNTS_PATH"))
 	if err != nil {
-		log.Fatalf("load account: %v", err)
+		lg.Error("load account", "err", err, "path", os.Getenv("ACCOUNTS_PATH"))
+		os.Exit(1)
 	}
 	selfLogin := strings.ToLower(account.User)
 
 	token, err := oauth.LoadTokenJSON(os.Getenv("TOKENS_PATH"))
 	if err != nil {
-		log.Fatalf("load token: %v", err)
+		lg.Error("load token", "err", err, "path", os.Getenv("TOKENS_PATH"))
+		os.Exit(1)
 	}
 
 	// ctx canceled by signal
@@ -50,16 +54,22 @@ func main() {
 	parseCh := make(chan ircevents.Event, 1000)
 
 	// connect (fail fast before goroutines)
+	lg.Info("starting", "nick", account.Nick)
+
 	conn, err := TwitchWebsocket(ctx, token.AccessToken, account.Nick, os.Getenv("TWITCH_IRC_URI"))
 	if err != nil {
-		log.Fatal(err)
+		lg.Error("websocket connect failed", "err", err, "uri", os.Getenv("TWITCH_IRC_URI"))
+		os.Exit(1)
 	}
 	defer conn.Close()
+
+	lg.Info("connected", "uri", os.Getenv("TWITCH_IRC_URI"))
 
 	// Build JSON controller (single writer), consuming HTTP intents from controlCh.
 	ctl, err := channelrecord.NewController(os.Getenv("CHANNELS_PATH"), account.Nick, controlCh)
 	if err != nil {
-		log.Fatalf("channel controller init: %v", err)
+		observe.C("channelrecord").Error("init controller", "err", err, "path", os.Getenv("CHANNELS_PATH"))
+		os.Exit(1)
 	}
 
 	// kafka writer (lifecycle tied to main)
@@ -106,6 +116,8 @@ func main() {
 
 	// ---- wait for first error or signal ----
 	if err := g.Wait(); err != nil {
-		log.Printf("fatal pipeline error: %v", err)
+		lg.Error("fatal pipeline error", "err", err)
+	} else {
+		lg.Info("shutdown complete")
 	}
 }

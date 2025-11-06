@@ -13,13 +13,15 @@ import (
 	"github.com/Jamie-38/stream-pipeline/internal/config"
 	"github.com/Jamie-38/stream-pipeline/internal/healthcheck"
 	"github.com/Jamie-38/stream-pipeline/internal/oauth"
+	// "github.com/Jamie-38/stream-pipeline/internal/observe"
 )
 
 func main() {
 	config.LoadEnv()
 
-	mux := http.NewServeMux()
+	// lg := observe.C("oauth_server")
 
+	mux := http.NewServeMux()
 	healthcheck.Register(mux)
 	healthcheck.SetNotReady()
 

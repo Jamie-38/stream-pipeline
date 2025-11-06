@@ -2,22 +2,26 @@ package main
 
 import (
 	"context"
-	"fmt"
+	// "fmt"
 	"strings"
 
 	ircevents "github.com/Jamie-38/stream-pipeline/internal/irc_events"
+	"github.com/Jamie-38/stream-pipeline/internal/observe"
 	"github.com/Jamie-38/stream-pipeline/internal/types"
 )
 
 func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ircevents.Event, membershipCh chan<- types.MembershipEvent, username string) {
+	lg := observe.C("classifier")
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 
-		case line := <-readerCh:
-			if len(line) == 0 {
-				continue
+		case line, ok := <-readerCh:
+			if !ok { // channel closed
+				lg.Info("reader channel closed")
+				return
 			}
 			i := 0
 
@@ -27,7 +31,7 @@ func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ir
 			if i < len(line) && line[i] == '@' {
 				j := strings.IndexByte(line[i:], ' ')
 				if j < 0 {
-					fmt.Println("skip: malformed tags (no space)")
+					lg.Debug("skip malformed", "reason", "malformed tags")
 					continue
 				}
 				tags = line[i+1 : i+j] // drop '@'
@@ -42,7 +46,7 @@ func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ir
 			if i < len(line) && line[i] == ':' {
 				j := strings.IndexByte(line[i:], ' ')
 				if j < 0 {
-					fmt.Println("skip: malformed prefix (no space)")
+					lg.Debug("skip malformed", "reason", "malformed prefix")
 					continue
 				}
 				prefix = line[i+1 : i+j] // drop ':'
@@ -51,7 +55,7 @@ func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ir
 
 			// ---- COMMAND (required) ----
 			if i >= len(line) {
-				fmt.Println("skip: missing command")
+				lg.Debug("skip malformed", "reason", "missing command")
 				continue
 			}
 			var command string
@@ -77,50 +81,52 @@ func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ir
 				}
 			}
 
-			// ---- DEBUG: show core tokens ----
-			// fmt.Println("tags   :", tags)
-			fmt.Println("prefix :", prefix)
-			fmt.Println("command:", command)
-			fmt.Println("params :", params)
-			fmt.Println("trail  :", trailing)
+			lg.Debug("parsed line",
+				"command", command,
+				"params_len", len(params),
+				"trailing_len", len(trailing),
+			)
 
 			// ---- COMMAND HANDLERS (minimal) ----
 			switch command {
 			case "PRIVMSG":
 				if len(params) == 0 || len(trailing) == 0 {
-					fmt.Println("skip: malformed PRIVMSG (missing channel or text)")
+					lg.Debug("skip malformed", "reason", "malformed PRIVMSG")
 					continue
 				}
 
-				// Prefer authoritative IDs from tags (fall back to names if missing)
-				// Assume you turned the raw `tags` string into tagsMap via a tiny helper.
-				userID := tagsMap["user-id"]
-				channelID := tagsMap["room-id"]
+				// From tags (authoritative when present)
+				userID := tagsMap["user-id"]    // stable numeric id (string of digits)
+				channelID := tagsMap["room-id"] // stable numeric id (string of digits)
 
-				// Fallbacks (don’t crash if tags are missing during early testing)
-				if userID == "" {
-					userID = loginFromPrefix(prefix) // login, not ideal, but okay as a fallback
-				}
-				chanLogin := params[0] // e.g. "#vedal987"
-				if channelID == "" {
-					channelID = strings.TrimPrefix(chanLogin, "#")
+				// From prefix/params (logins)
+				userLogin := strings.ToLower(loginFromPrefix(prefix)) // mutable username/login
+				chanLogin := strings.TrimPrefix(strings.ToLower(params[0]), "#")
+
+				if channelID == "" && chanLogin == "" {
+					lg.Debug("drop PRIVMSG: no channel id or login")
+					continue
 				}
 
 				evt := ircevents.PrivMsg{
-					UserID:    userID,
-					ChannelID: channelID,
-					Text:      trailing, // full message text
+					UserID:       userID,    // may be empty if tags missing
+					UserLogin:    userLogin, // may be empty if prefix absent
+					ChannelID:    channelID, // may be empty if tags missing
+					ChannelLogin: chanLogin, // fallback identity for channel
+					Text:         trailing,
 				}
 
+				// fmt.Println(userID, trailing)
+
 				select {
-				case parseCh <- evt: // PrivMsg satisfies Event; implicit interface conversion
+				case parseCh <- evt:
 				case <-ctx.Done():
 					return
 				}
 
 			case "JOIN", "PART":
 				if len(params) == 0 {
-					fmt.Println("skip: malformed", command, "(missing channel)")
+					lg.Debug("skip malformed", "reason", "missing channel")
 					continue
 				}
 
@@ -151,6 +157,7 @@ func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ir
 					return
 				default:
 					// drop if full; rectifier will reconcile on next tick/timeout
+					lg.Debug("membership event dropped (full)", "channel", ch, "op", command)
 				}
 
 			default:
