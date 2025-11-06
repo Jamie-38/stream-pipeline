@@ -29,20 +29,10 @@ func main() {
 	}
 	selfLogin := strings.ToLower(account.User)
 
-	// channels, err := config.LoadChannels(os.Getenv("CHANNELS_PATH"))
-	// if err != nil {
-	// 	log.Fatalf("load channels: %v", err)
-	// }
-
 	token, err := oauth.LoadTokenJSON(os.Getenv("TOKENS_PATH"))
 	if err != nil {
 		log.Fatalf("load token: %v", err)
 	}
-
-	// validate channels match account
-	// if account.Name != channels.Account {
-	// 	log.Fatalf("account name does not match channels account")
-	// }
 
 	// ctx canceled by signal
 	root, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -73,7 +63,7 @@ func main() {
 	}
 
 	// kafka writer (lifecycle tied to main)
-	w := kstream.NewWriter()
+	w := kstream.NewWriter(os.Getenv("KAFKA_BROKERS"), os.Getenv("KAFKA_TOPIC"))
 	defer w.Close()
 
 	// ---- all stages run under errgroup ----
@@ -104,7 +94,7 @@ func main() {
 
 	// Parser: readerCh -> parseCh
 	g.Go(func() error {
-		Classify_line(ctx, readerCh, parseCh, membershipCh, selfLogin)
+		ClassifyLine(ctx, readerCh, parseCh, membershipCh, selfLogin)
 		return nil
 	})
 

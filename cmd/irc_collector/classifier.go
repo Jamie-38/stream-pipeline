@@ -9,7 +9,7 @@ import (
 	"github.com/Jamie-38/stream-pipeline/internal/types"
 )
 
-func Classify_line(ctx context.Context, readerCh <-chan string, parseCh chan<- ircevents.Event, membershipCh chan<- types.MembershipEvent, username string) {
+func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ircevents.Event, membershipCh chan<- types.MembershipEvent, username string) {
 	for {
 		select {
 		case <-ctx.Done():

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Jamie-38/stream-pipeline/internal/healthcheck"
 	"github.com/Jamie-38/stream-pipeline/internal/types"
 )
 
@@ -29,7 +30,11 @@ func Run(ctx context.Context, controlCh chan types.IRCCommand) error {
 	api := &APIController{ControlCh: controlCh}
 
 	mux := http.NewServeMux()
+	healthcheck.Register(mux)
+
 	mux.HandleFunc("/join", api.Join)
+
+	healthcheck.SetReady()
 
 	hostEnv := os.Getenv("HTTP_API_HOST")
 	host := strings.TrimSpace(hostEnv)
@@ -61,10 +66,16 @@ func Run(ctx context.Context, controlCh chan types.IRCCommand) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
+	ln, err := net.Listen("tcp", address)
+	if err != nil {
+		return fmt.Errorf("http_api: listen error on %s: %w", address, err)
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
 		log.Printf("http_api: listening on %s", address)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		healthcheck.SetReady() // only after bind succeeds
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 			errCh <- err
 			return
 		}

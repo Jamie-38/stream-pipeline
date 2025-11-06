@@ -17,4 +17,7 @@ tokens/
 accounts/*.config.json
 internal/channel_record/channels.json
 
+.dockerfile
+.dockerignore
+
 

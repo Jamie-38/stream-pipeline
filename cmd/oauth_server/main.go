@@ -4,12 +4,14 @@ package main
 import (
 	"context"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"time"
 
 	"github.com/Jamie-38/stream-pipeline/internal/config"
+	"github.com/Jamie-38/stream-pipeline/internal/healthcheck"
 	"github.com/Jamie-38/stream-pipeline/internal/oauth"
 )
 
@@ -17,6 +19,10 @@ func main() {
 	config.LoadEnv()
 
 	mux := http.NewServeMux()
+
+	healthcheck.Register(mux)
+	healthcheck.SetNotReady()
+
 	mux.HandleFunc("/", oauth.Index)
 	mux.HandleFunc("/callback", oauth.Callback)
 
@@ -35,12 +41,16 @@ func main() {
 		// ErrorLog:        log.New(...), // optional: custom logger
 	}
 
-	// Start the server in the background.
+	ln, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		log.Fatalf("oauth_server: listen error: %v", err)
+	}
+
 	go func() {
 		log.Printf("oauth_server: listening on :%s", port)
-		// http.ErrServerClosed is expected on Shutdown; treat other errors as fatal.
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("oauth_server: listen error: %v", err)
+		healthcheck.SetReady() // now we know the port is bound
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Printf("oauth_server: serve error: %v", err)
 		}
 	}()
 
