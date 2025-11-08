@@ -8,17 +8,11 @@ type Event interface {
 	Marshal() ([]byte, error)
 }
 
-// type PrivMsg struct {
-// 	UserID    string
-// 	ChannelID string
-// 	Text      string
-// }
-
 type PrivMsg struct {
-	UserID       string // e.g., "464309918" (stable, from tags)
-	UserLogin    string // e.g., "someviewer" (mutable, from prefix)
-	ChannelID    string // e.g., "12345678" (stable, from tags)
-	ChannelLogin string // e.g., "coolstreamer" (from params)
+	UserID       string
+	UserLogin    string
+	ChannelID    string
+	ChannelLogin string
 	Text         string
 }
 

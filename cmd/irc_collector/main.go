@@ -21,9 +21,11 @@ import (
 )
 
 func main() {
-	config.LoadEnv()
-
 	lg := observe.C("irc_collector")
+
+	if err := config.LoadEnv(); err != nil {
+		lg.Warn("env file not loaded", "err", err)
+	}
 
 	account, err := config.LoadAccount(os.Getenv("ACCOUNTS_PATH"))
 	if err != nil {

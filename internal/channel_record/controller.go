@@ -1,4 +1,3 @@
-// internal/channel_record/controller.go
 package channelrecord
 
 import (
@@ -6,26 +5,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/Jamie-38/stream-pipeline/internal/observe"
 	"github.com/Jamie-38/stream-pipeline/internal/types"
 )
 
-// Controller is a single-writer "actor" that owns the desired channel set.
-// It consumes IRCCommand from controlCh, persists to JSON, and exposes a read-only snapshot.
 type Controller struct {
 	path            string // path to channels.json
 	account         string // validated account name
-	schema          int    // schema version; start at 1
+	schema          int    // schema version
 	controlCh       <-chan types.IRCCommand
-	updatesCh       chan struct{} // edge-trigger notify (len 1)
-	mu              sync.RWMutex  // guards snap
-	snap            snapshot      // immutable view for readers
-	writeDebounceMs int           // optional small debounce window
+	updatesCh       chan struct{}
+	mu              sync.RWMutex
+	snap            snapshot // immutable view for readers
+	writeDebounceMs int      // debounce window
+	lg              *slog.Logger
 }
 
 // snapshot is the immutable read view returned to readers.
@@ -37,8 +37,11 @@ type snapshot struct {
 }
 
 // NewController loads or initializes channels.json, validates account, and returns a controller.
-// It does not start the loop; call Run(ctx).
 func NewController(path string, expectedAccount string, controlCh <-chan types.IRCCommand) (*Controller, error) {
+	lg := observe.
+		C("channelrecord").
+		With("account", expectedAccount, "path", path)
+
 	if path == "" {
 		return nil, errors.New("channelrecord: empty path")
 	}
@@ -52,25 +55,28 @@ func NewController(path string, expectedAccount string, controlCh <-chan types.I
 		schema:          1,
 		controlCh:       controlCh,
 		updatesCh:       make(chan struct{}, 1),
-		writeDebounceMs: 150, // small coalescing window for bursts
+		writeDebounceMs: 150,
+		lg:              lg,
 	}
 
 	// Load existing file if present; otherwise create an empty set for this account.
 	onDisk, err := loadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("load channels file: %w", err)
+		return nil, fmt.Errorf("channelrecord: load channels file %q: %w", path, err)
 	}
 
 	var desired map[string]struct{}
 	if err == nil {
-		// File existed: validate account
 		if onDisk.Account != "" && onDisk.Account != expectedAccount {
-			return nil, fmt.Errorf("channels file account %q != expected %q", onDisk.Account, expectedAccount)
+			return nil, fmt.Errorf("channelrecord: channels file account %q != expected %q",
+				onDisk.Account, expectedAccount)
 		}
 		desired = sliceToSet(onDisk.Channels)
 		c.schema = onDisk.Schema
+		lg.Debug("loaded channels file", "schema", c.schema, "channels", len(desired))
 	} else {
 		desired = make(map[string]struct{})
+		lg.Debug("no existing channels file; will initialize")
 	}
 
 	// Build initial immutable snapshot
@@ -82,20 +88,21 @@ func NewController(path string, expectedAccount string, controlCh <-chan types.I
 		Channels:  chans,
 	}
 
-	// If file didn't exist, persist initial empty set for the account.
 	if errors.Is(err, os.ErrNotExist) {
 		if err := c.writeFile(c.snap); err != nil {
-			return nil, fmt.Errorf("initialize channels file: %w", err)
+			return nil, fmt.Errorf("channelrecord: initialize channels file %q: %w", path, err)
 		}
+		lg.Info("initialized channels file", "channels", len(chans))
 	}
 
+	lg.Info("controller ready",
+		"version", c.snap.Version, "channels", len(chans))
 	return c, nil
 }
 
-// Run is the actor loop. It consumes HTTP intents from controlCh, updates the desired set,
-// persists atomically (debounced), and notifies readers via Updates().
 func (c *Controller) Run(ctx context.Context) error {
-	// Local mutable working set (only visible inside Run).
+	lg := c.lg
+
 	desired := sliceToSet(c.readSnap().Channels)
 	version := c.readSnap().Version
 
@@ -105,13 +112,22 @@ func (c *Controller) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			s := c.readSnap()
+			lg.Info("controller stopping",
+				"reason", "context_canceled",
+				"version", s.Version,
+				"channels_count", len(s.Channels),
+				"path", c.path,
+				"account", c.account,
+			)
+
 			return ctx.Err()
 
 		case cmd := <-c.controlCh:
 			// Normalize channel key
 			ch, ok := normalizeChannel(cmd.Channel)
 			if !ok {
-				// bad input; ignore silently or log upstream
+				lg.Debug("dropping invalid command", "op", cmd.Op, "raw_channel", cmd.Channel)
 				continue
 			}
 
@@ -120,6 +136,7 @@ func (c *Controller) Run(ctx context.Context) error {
 				if _, exists := desired[ch]; !exists {
 					desired[ch] = struct{}{}
 					dirty = true
+					lg.Info("desired add", "channel", ch)
 					if debounce == nil {
 						debounce = time.After(time.Duration(c.writeDebounceMs) * time.Millisecond)
 					}
@@ -128,12 +145,13 @@ func (c *Controller) Run(ctx context.Context) error {
 				if _, exists := desired[ch]; exists {
 					delete(desired, ch)
 					dirty = true
+					lg.Info("desired remove", "channel", ch)
 					if debounce == nil {
 						debounce = time.After(time.Duration(c.writeDebounceMs) * time.Millisecond)
 					}
 				}
 			default:
-				// unknown op; ignore or log
+				lg.Debug("unknown op", "op", cmd.Op)
 			}
 
 		case <-debounce:
@@ -153,6 +171,7 @@ func (c *Controller) Run(ctx context.Context) error {
 				// Publish new snapshot for readers.
 				c.writeSnap(newSnap)
 				c.nonBlockingNotify()
+				lg.Info("persisted snapshot", "version", version, "channels", len(newSnap.Channels))
 			}
 			dirty = false
 			debounce = nil
@@ -160,8 +179,6 @@ func (c *Controller) Run(ctx context.Context) error {
 	}
 }
 
-// Snapshot returns the latest immutable view.
-// It copies the channel slice so callers cannot mutate internal state.
 func (c *Controller) Snapshot() (version uint64, channels []string, updatedAt time.Time, account string) {
 	s := c.readSnap()
 	cp := make([]string, len(s.Channels))
@@ -169,8 +186,6 @@ func (c *Controller) Snapshot() (version uint64, channels []string, updatedAt ti
 	return s.Version, cp, s.UpdatedAt, s.Account
 }
 
-// Updates is a best-effort "changed" ping channel.
-// Readers can select on it to wake up promptly, then call Snapshot().
 func (c *Controller) Updates() <-chan struct{} {
 	return c.updatesCh
 }
@@ -281,7 +296,6 @@ func (c *Controller) writeFile(s snapshot) error {
 	if err := os.Rename(tmp, c.path); err != nil {
 		return fmt.Errorf("rename tmp→final: %w", err)
 	}
-	// (Optional) fsync the directory for extra durability — not shown here.
 	return nil
 }
 

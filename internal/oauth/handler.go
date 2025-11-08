@@ -7,8 +7,11 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/Jamie-38/stream-pipeline/internal/observe"
 	"github.com/Jamie-38/stream-pipeline/internal/types"
 )
+
+var lg = observe.C("oauth")
 
 func Index(w http.ResponseWriter, r *http.Request) {
 	clientID := os.Getenv("TWITCH_CLIENT_ID")
@@ -18,6 +21,7 @@ func Index(w http.ResponseWriter, r *http.Request) {
 		"https://id.twitch.tv/oauth2/authorize?client_id=%s&redirect_uri=%s&response_type=code&scope=chat:read",
 		clientID, redirectURI)
 
+	lg.Info("oauth index hit", "remote", r.RemoteAddr)
 	fmt.Fprintf(w, `<a href="%s">Click here to authenticate with Twitch</a>`, authURL)
 }
 
@@ -29,7 +33,8 @@ func Callback(w http.ResponseWriter, r *http.Request) {
 
 	code := r.URL.Query().Get("code")
 	if code == "" {
-		fmt.Fprintf(w, "Error: No code received.")
+		lg.Warn("callback missing code", "remote", r.RemoteAddr)
+		http.Error(w, "Error: No code received", http.StatusBadRequest)
 		return
 	}
 
@@ -40,30 +45,37 @@ func Callback(w http.ResponseWriter, r *http.Request) {
 	data.Set("grant_type", "authorization_code")
 	data.Set("redirect_uri", redirectURI)
 
+	lg.Info("exchanging code for token", "remote", r.RemoteAddr)
+
 	resp, err := http.PostForm(tokenURL, data)
 	if err != nil {
-		fmt.Fprintf(w, "Failed to post: %v", err)
+		lg.Error("token request failed", "err", err)
+		http.Error(w, "Failed to post", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
 
-	decoder := json.NewDecoder(resp.Body)
-
 	var tokenData types.Token
-	err = decoder.Decode(&tokenData)
-	if err != nil {
-		fmt.Fprintf(w, "Failed to parse response: %v", err)
+	if err := json.NewDecoder(resp.Body).Decode(&tokenData); err != nil {
+		lg.Error("decode token response failed", "err", err)
+		http.Error(w, "Failed to parse response", http.StatusBadGateway)
 		return
 	}
 
-	fmt.Fprintf(w, "%+v\n", tokenData)
-
-	f, err := os.Create(fmt.Sprintf("tokens/%s.token.json", "default"))
+	path := "tokens/default.token.json"
+	f, err := os.Create(path)
 	if err != nil {
-		fmt.Fprintf(w, "Failed to write token file: %v", err)
+		lg.Error("failed to write token file", "path", path, "err", err)
+		http.Error(w, "Failed to write token file", http.StatusInternalServerError)
 		return
 	}
 	defer f.Close()
+	if err := json.NewEncoder(f).Encode(tokenData); err != nil {
+		lg.Error("failed to encode token file", "path", path, "err", err)
+		http.Error(w, "Failed to encode token file", http.StatusInternalServerError)
+		return
+	}
 
-	json.NewEncoder(f).Encode(tokenData)
+	lg.Info("oauth token saved", "path", path, "remote", r.RemoteAddr)
+	fmt.Fprintf(w, "Authentication successful. Token saved.")
 }

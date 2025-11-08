@@ -5,7 +5,9 @@ import (
 	"strings"
 	"time"
 
-	// ircevents "github.com/Jamie-38/stream-pipeline/internal/irc_events"
+	"log/slog"
+
+	"github.com/Jamie-38/stream-pipeline/internal/observe"
 	"github.com/Jamie-38/stream-pipeline/internal/types"
 )
 
@@ -35,6 +37,17 @@ func NewDefaultConfig() Config {
 }
 
 func Run(ctx context.Context, desired DesiredSnapshot, events <-chan types.MembershipEvent, out chan<- types.IRCCommand, cfg Config) error {
+	_, _, _, acct := desired.Snapshot()
+	lg := observe.C("rectifier").With(
+		"account", acct,
+		"tokens_per_sec", cfg.TokensPerSecond,
+		"burst", cfg.Burst,
+		"join_timeout_s", cfg.JoinTimeout.Seconds(),
+		"backoff_min_s", cfg.BackoffMin.Seconds(),
+		"backoff_max_s", cfg.BackoffMax.Seconds(),
+		"tick_ms", cfg.Tick.Milliseconds(),
+	)
+
 	r := &reconciler{
 		desired:      desired,
 		events:       events,
@@ -43,11 +56,38 @@ func Run(ctx context.Context, desired DesiredSnapshot, events <-chan types.Membe
 		state:        make(map[string]*chanState),
 		tokenBucket:  newBucket(cfg.TokensPerSecond, cfg.Burst),
 		lastDesiredV: 0,
+		lg:           lg,
 	}
-	return r.loop(ctx)
+	// return r.loop(ctx)
+
+	lg.Info("rectifier starting")
+	err := r.loop(ctx)
+	if err != nil {
+		lg.Error("rectifier stopped", "err", err)
+	} else {
+		lg.Info("rectifier stopped")
+	}
+	return err
 }
 
 type phase int
+
+func (p phase) String() string {
+	switch p {
+	case Idle:
+		return "Idle"
+	case Joining:
+		return "Joining"
+	case Joined:
+		return "Joined"
+	case Parting:
+		return "Parting"
+	case Error:
+		return "Error"
+	default:
+		return "Unknown"
+	}
+}
 
 const (
 	Idle phase = iota
@@ -75,6 +115,7 @@ type reconciler struct {
 	state        map[string]*chanState
 	tokenBucket  *bucket
 	lastDesiredV uint64
+	lg           *slog.Logger
 }
 
 func (r *reconciler) loop(ctx context.Context) error {
@@ -86,17 +127,21 @@ func (r *reconciler) loop(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			r.lg.Info("rectifier stopping: context canceled")
 			return ctx.Err()
 
 		case <-tick.C:
+			// r.lg.Debug("tick")
 			r.observeDesired()
 			r.reconcile(time.Now())
 
 		case <-updates:
+			r.lg.Debug("desired snapshot updated")
 			r.observeDesired()
 			r.reconcile(time.Now())
 
 		case evt := <-r.events:
+			r.lg.Debug("membership event", "op", evt.Op, "channel", evt.Channel)
 			r.observeEvent(evt)
 			r.reconcile(time.Now())
 		}
@@ -108,6 +153,7 @@ func (r *reconciler) observeDesired() {
 	if v == r.lastDesiredV {
 		return
 	}
+	r.lg.Info("desired set changed", "version", v, "channels", len(chans))
 	for name, s := range r.state {
 		s.want = false
 		_ = name
@@ -130,6 +176,7 @@ func (r *reconciler) observeEvent(evt types.MembershipEvent) {
 		if !s.have {
 			s.have = true
 			s.phase = Joined
+			r.lg.Info("join confirmed", "channel", ch)
 		}
 
 	default:
@@ -144,12 +191,13 @@ func (r *reconciler) reconcile(now time.Time) {
 			continue
 		}
 		if s.have && (s.phase == Idle || s.phase == Joined || (s.phase == Error && now.After(s.nextTryAt))) {
+			r.lg.Debug("trying PART", "channel", name, "phase", s.phase.String())
 			if r.trySend(now, "PART", name, s) {
 				continue
 			}
 		}
 
-		r.maybeTimeout(now, s, "PART")
+		r.maybeTimeout(now, s)
 	}
 
 	for name, s := range r.state {
@@ -157,16 +205,18 @@ func (r *reconciler) reconcile(now time.Time) {
 			continue
 		}
 		if !s.have && (s.phase == Idle || s.phase == Error && now.After(s.nextTryAt)) {
+			r.lg.Debug("trying JOIN", "channel", name, "phase", s.phase.String())
 			if r.trySend(now, "JOIN", name, s) {
 				continue
 			}
 		}
-		r.maybeTimeout(now, s, "JOIN")
+		r.maybeTimeout(now, s)
 	}
 }
 
 func (r *reconciler) trySend(now time.Time, op string, channel string, s *chanState) bool {
 	if !r.tokenBucket.take(now) {
+		r.lg.Debug("rate-limited; skipping for now", "op", op, "channel", channel)
 		return false
 	}
 
@@ -185,17 +235,27 @@ func (r *reconciler) trySend(now time.Time, op string, channel string, s *chanSt
 				s.backoff = r.cfg.BackoffMin
 			}
 		}
+		r.lg.Info("command emitted", "op", op, "channel", channel, "deadline_s", r.cfg.JoinTimeout.Seconds())
 		return true
 	default:
 		r.tokenBucket.refund(now)
+		r.lg.Warn("out channel full; command not emitted", "op", op, "channel", channel)
 		return false
 	}
 }
 
-func (r *reconciler) maybeTimeout(now time.Time, s *chanState, op string) {
+func (r *reconciler) maybeTimeout(now time.Time, s *chanState) {
 	if (s.phase == Joining || s.phase == Parting) && now.After(s.deadline) {
+		op := s.phase.String()
+
 		s.phase = Error
 		s.nextTryAt = now.Add(s.backoff)
+
+		r.lg.Info("operation timed out; scheduling retry",
+			"phase", op,
+			"next_try_in_s", s.backoff.Seconds(),
+		)
+
 		s.backoff *= 2
 		if s.backoff > r.cfg.BackoffMax {
 			s.backoff = r.cfg.BackoffMax
@@ -214,6 +274,7 @@ func (r *reconciler) ensure(ch string) *chanState {
 		backoff: r.cfg.BackoffMin,
 	}
 	r.state[ch] = st
+	r.lg.Debug("created channel state", "channel", ch)
 	return st
 }
 
