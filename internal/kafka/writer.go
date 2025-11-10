@@ -1,10 +1,16 @@
 package kafka
 
 import (
+	"context"
 	"strings"
 
 	kafkago "github.com/segmentio/kafka-go"
 )
+
+type MessageWriter interface {
+	WriteMessages(ctx context.Context, msgs ...kafkago.Message) error
+	Close() error
+}
 
 func NewWriter(brokersCSV, topic string) *kafkago.Writer {
 	parts := strings.Split(brokersCSV, ",")

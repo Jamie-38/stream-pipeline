@@ -30,6 +30,7 @@ func Callback(w http.ResponseWriter, r *http.Request) {
 	clientSecret := os.Getenv("TWITCH_CLIENT_SECRET")
 	redirectURI := os.Getenv("TWITCH_REDIRECT_URI")
 	tokenURL := "https://id.twitch.tv/oauth2/token"
+	path := os.Getenv("TOKENS_PATH")
 
 	code := r.URL.Query().Get("code")
 	if code == "" {
@@ -62,7 +63,6 @@ func Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := "tokens/default.token.json"
 	f, err := os.Create(path)
 	if err != nil {
 		lg.Error("failed to write token file", "path", path, "err", err)

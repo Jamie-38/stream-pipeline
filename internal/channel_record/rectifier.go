@@ -54,11 +54,11 @@ func Run(ctx context.Context, desired DesiredSnapshot, events <-chan types.Membe
 		out:          out,
 		cfg:          cfg,
 		state:        make(map[string]*chanState),
-		tokenBucket:  newBucket(cfg.TokensPerSecond, cfg.Burst),
+		tokenBucket:  newBucket(cfg.TokensPerSecond, cfg.Burst, realClock{}),
 		lastDesiredV: 0,
 		lg:           lg,
+		clk:          realClock{},
 	}
-	// return r.loop(ctx)
 
 	lg.Info("rectifier starting")
 	err := r.loop(ctx)
@@ -116,6 +116,7 @@ type reconciler struct {
 	tokenBucket  *bucket
 	lastDesiredV uint64
 	lg           *slog.Logger
+	clk          Clock
 }
 
 func (r *reconciler) loop(ctx context.Context) error {
@@ -131,19 +132,18 @@ func (r *reconciler) loop(ctx context.Context) error {
 			return ctx.Err()
 
 		case <-tick.C:
-			// r.lg.Debug("tick")
 			r.observeDesired()
-			r.reconcile(time.Now())
+			r.reconcile(r.clk.Now())
 
 		case <-updates:
 			r.lg.Debug("desired snapshot updated")
 			r.observeDesired()
-			r.reconcile(time.Now())
+			r.reconcile(r.clk.Now())
 
 		case evt := <-r.events:
 			r.lg.Debug("membership event", "op", evt.Op, "channel", evt.Channel)
 			r.observeEvent(evt)
-			r.reconcile(time.Now())
+			r.reconcile(r.clk.Now())
 		}
 	}
 }
@@ -283,27 +283,29 @@ type bucket struct {
 	capacity   float64
 	tokens     float64
 	lastUpdate time.Time
+	clk        Clock
 }
 
-func newBucket(tokensPerSec float64, burst int) *bucket {
+func newBucket(tokensPerSec float64, burst int, clk Clock) *bucket {
+	now := clk.Now()
 	return &bucket{
 		rate:       tokensPerSec,
 		capacity:   float64(burst),
 		tokens:     float64(burst),
-		lastUpdate: time.Now(),
+		lastUpdate: now,
+		clk:        clk,
 	}
 }
 
 func (b *bucket) refill(now time.Time) {
 	elapsed := now.Sub(b.lastUpdate).Seconds()
-	if elapsed <= 0 {
-		return
+	if elapsed > 0 {
+		b.tokens += elapsed * b.rate
+		if b.tokens > b.capacity {
+			b.tokens = b.capacity
+		}
+		b.lastUpdate = now
 	}
-	b.tokens += elapsed * b.rate
-	if b.tokens > b.capacity {
-		b.tokens = b.capacity
-	}
-	b.lastUpdate = now
 }
 
 func (b *bucket) take(now time.Time) bool {
@@ -317,7 +319,7 @@ func (b *bucket) take(now time.Time) bool {
 
 func (b *bucket) refund(now time.Time) {
 	b.refill(now)
-	b.tokens += 1.0
+	b.tokens++
 	if b.tokens > b.capacity {
 		b.tokens = b.capacity
 	}

@@ -9,7 +9,7 @@ import (
 	ircevents "github.com/Jamie-38/stream-pipeline/internal/irc_events"
 )
 
-func KafkaProducer(ctx context.Context, writer *kafkago.Writer, parseCh <-chan ircevents.Event) {
+func KafkaProducer(ctx context.Context, writer MessageWriter, parseCh <-chan ircevents.Event) {
 	for {
 		select {
 		case <-ctx.Done():
