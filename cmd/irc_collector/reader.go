@@ -11,33 +11,42 @@ import (
 
 func StartReader(ctx context.Context, conn *websocket.Conn, writerCh chan<- string, readCh chan<- string) error {
 	lg := observe.C("reader")
+
+	// Ensure the blocking ReadMessage unblocks when ctx is cancelled.
+	done := make(chan struct{})
+	go func() {
+		<-ctx.Done()
+		_ = conn.Close()
+		close(done)
+	}()
+
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			_, payload, err := conn.ReadMessage()
-			if err != nil {
-				lg.Warn("socket read failed", "err", err)
-				return err
+		_, payload, err := conn.ReadMessage()
+		if err != nil {
+			if ctx.Err() != nil {
+				lg.Info("reader stopping", "reason", "context_canceled")
+				return ctx.Err()
 			}
-			for _, line := range strings.Split(string(payload), "\r\n") {
-				if line == "" {
-					continue
-				}
-				if strings.HasPrefix(line, "PING") {
-					select {
-					case writerCh <- "PONG :tmi.twitch.tv\r\n":
-					case <-ctx.Done():
-						return ctx.Err()
-					}
-					continue
-				}
+			lg.Warn("socket read failed", "err", err)
+			return err
+		}
+
+		for _, line := range strings.Split(string(payload), "\r\n") {
+			if line == "" {
+				continue
+			}
+			if strings.HasPrefix(line, "PING") {
 				select {
-				case readCh <- line:
+				case writerCh <- "PONG :tmi.twitch.tv\r\n":
 				case <-ctx.Done():
 					return ctx.Err()
 				}
+				continue
+			}
+			select {
+			case readCh <- line:
+			case <-ctx.Done():
+				return ctx.Err()
 			}
 		}
 	}
