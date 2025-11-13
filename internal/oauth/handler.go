@@ -54,6 +54,11 @@ func Callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to post", http.StatusBadGateway)
 		return
 	}
+	if resp.StatusCode != http.StatusOK {
+		lg.Error("token endpoint returned non-200", "status", resp.StatusCode)
+		http.Error(w, "Token exchange failed", http.StatusBadGateway)
+		return
+	}
 	defer resp.Body.Close()
 
 	var tokenData types.Token

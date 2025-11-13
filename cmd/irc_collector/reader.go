@@ -12,14 +12,6 @@ import (
 func StartReader(ctx context.Context, conn *websocket.Conn, writerCh chan<- string, readCh chan<- string) error {
 	lg := observe.C("reader")
 
-	// Ensure the blocking ReadMessage unblocks when ctx is cancelled.
-	done := make(chan struct{})
-	go func() {
-		<-ctx.Done()
-		_ = conn.Close()
-		close(done)
-	}()
-
 	for {
 		_, payload, err := conn.ReadMessage()
 		if err != nil {
