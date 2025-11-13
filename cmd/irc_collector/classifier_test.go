@@ -128,7 +128,7 @@ func TestClassifier_Membership_SelfOnly(t *testing.T) {
 	}
 
 	// Self PART emits
-	r.in <- ":me!me@tmi.twitch.tv PART chess" // missing '#' accepted by normalizer in writer
+	r.in <- ":me!me@tmi.twitch.tv PART chess" // missing '#' accepted by normaliser in writer
 	ev, ok = recvEvt(t, r.memb)
 	if !ok {
 		t.Fatal("expected membership part")

@@ -22,7 +22,6 @@ func LoadAccount(path string) (types.Account, error) {
 		return acc, fmt.Errorf("decode account json %q: %w", path, err)
 	}
 
-	// Minimal validation to catch empty/misnamed fields early.
 	if acc.User == "" {
 		return acc, fmt.Errorf("account %q missing required field: username/name", path)
 	}

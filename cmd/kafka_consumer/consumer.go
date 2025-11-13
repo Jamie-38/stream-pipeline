@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	// make a new reader that consumes from topic-A
+	// make a new reader that consumes from topic
 	r := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:  []string{"localhost:9094"},
 		GroupID:  "test-storage",

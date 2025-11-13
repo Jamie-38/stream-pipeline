@@ -1,4 +1,3 @@
-// internal/healthcheck/health.go
 package healthcheck
 
 import (
@@ -16,17 +15,14 @@ type Probe struct {
 	lg    *slog.Logger
 }
 
-// New creates a health probe with a component-scoped logger.
 func New(component string) *Probe {
 	return &Probe{
 		lg: observe.C("healthcheck").With("component", component),
 	}
 }
 
-// Register wires /healthz (always 200) and /readyz (200 when ready, 503 otherwise).
 func (p *Probe) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		// no per-request logs
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
@@ -40,7 +36,6 @@ func (p *Probe) Register(mux *http.ServeMux) {
 	})
 }
 
-// SetReady flips to ready and logs the transition once.
 func (p *Probe) SetReady() {
 	prev := atomic.SwapInt32(&p.ready, 1)
 	if prev != 1 {
@@ -48,7 +43,6 @@ func (p *Probe) SetReady() {
 	}
 }
 
-// SetNotReady flips to not-ready and logs the transition once.
 func (p *Probe) SetNotReady() {
 	prev := atomic.SwapInt32(&p.ready, 0)
 	if prev != 0 {

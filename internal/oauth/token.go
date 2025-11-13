@@ -21,7 +21,6 @@ func LoadTokenJSON(path string) (types.Token, error) {
 		return tok, fmt.Errorf("decode token json %q: %w", path, err)
 	}
 
-	// Minimal validation: presence and scope sanity (optional, tweak as needed).
 	if tok.AccessToken == "" {
 		return tok, fmt.Errorf("token %q missing access_token", path)
 	}

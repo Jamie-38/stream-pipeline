@@ -85,11 +85,11 @@ func TestRectifier_JoinRetryAndConfirm(t *testing.T) {
 	if st.phase != Error {
 		t.Fatalf("expected phase=Error after timeout, got %v", st.phase)
 	}
-	if st.backoff != cfg.BackoffMin*2 { // backoff doubles on first failure
+	if st.backoff != cfg.BackoffMin*2 {
 		t.Fatalf("expected backoff=%v, got %v", cfg.BackoffMin*2, st.backoff)
 	}
 
-	// Advance to retry time and reconcile → should emit another JOIN
+	// Advance to retry time and reconcile, should emit another JOIN
 	retryDelay := st.nextTryAt.Sub(clk.Now())
 	if retryDelay < 0 {
 		retryDelay = 0

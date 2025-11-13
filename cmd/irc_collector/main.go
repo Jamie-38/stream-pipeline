@@ -78,7 +78,7 @@ func main() {
 	w := kstream.NewWriter(os.Getenv("KAFKA_BROKERS"), os.Getenv("KAFKA_TOPIC"))
 	defer w.Close()
 
-	// ---- all stages run under errgroup ----
+	// all stages run under errgroup
 
 	// Channels controller
 	g.Go(func() error { return ctl.Run(ctx) })
@@ -116,7 +116,7 @@ func main() {
 		return nil
 	})
 
-	// ---- wait for first error or signal ----
+	// wait for first error or signal
 	if err := g.Wait(); err != nil {
 		lg.Error("fatal pipeline error", "err", err)
 	} else {

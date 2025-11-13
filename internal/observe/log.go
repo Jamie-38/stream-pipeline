@@ -24,14 +24,12 @@ func newLogger() *slog.Logger {
 	})
 	return slog.New(h).With(
 		slog.String("service", "stream-pipeline"),
-		slog.String("env", os.Getenv("APP_ENV")), // optional
+		slog.String("env", os.Getenv("APP_ENV")),
 	)
 }
 
-// L returns the process-wide logger.
 func L() *slog.Logger { return base }
 
-// C returns a child logger with a component tag.
 func C(component string) *slog.Logger {
 	return base.With(slog.String("component", component))
 }

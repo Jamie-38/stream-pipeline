@@ -1,9 +1,7 @@
-// cmd/oauth_server/main.go
 package main
 
 import (
 	"context"
-	// "log"
 	"net"
 	"net/http"
 	"os"
@@ -47,17 +45,14 @@ func main() {
 
 	ln, err := net.Listen("tcp", ":"+port)
 	if err != nil {
-		// log.Fatalf("oauth_server: listen error: %v", err)
 		lg.Error("listen error", "err", err, "port", port)
 		os.Exit(1)
 	}
 
 	go func() {
-		// log.Printf("oauth_server: listening on :%s", port)
 		lg.Info("listening", "addr", ":"+port)
-		probe.SetReady() // now we know the port is bound
+		probe.SetReady()
 		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
-			// log.Printf("oauth_server: serve error: %v", err)
 			lg.Error("serve error", "err", err)
 			os.Exit(1)
 		}
@@ -68,20 +63,15 @@ func main() {
 	signal.Notify(stop, os.Interrupt)
 
 	<-stop
-	// log.Println("oauth_server: shutdown signal received")
 	lg.Info("shutdown signal received", "port", port)
 
-	// Give in-flight requests time to finish.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Stop accepting new connections, drain keep-alives, finish in-flight.
 	if err := srv.Shutdown(ctx); err != nil {
-		// log.Printf("oauth_server: graceful shutdown did not complete: %v", err)
 		lg.Error("graceful shutdown did not complete", "err", err)
-		// Best-effort hard close if needed:
+
 		if cerr := srv.Close(); cerr != nil {
-			// log.Printf("oauth_server: forced close error: %v", cerr)
 			lg.Error("forced close error", "err", cerr)
 		}
 	} else {

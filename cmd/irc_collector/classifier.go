@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	// "fmt"
 	"strings"
 
 	ircevents "github.com/Jamie-38/stream-pipeline/internal/irc_events"
@@ -25,7 +24,7 @@ func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ir
 			}
 			i := 0
 
-			// ---- TAGS (optional, starts with '@') ----
+			// TAGS
 			var tags string
 			var tagsMap map[string]string
 			if i < len(line) && line[i] == '@' {
@@ -41,7 +40,7 @@ func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ir
 				tagsMap = map[string]string{}
 			}
 
-			// ---- PREFIX (optional, starts with ':') ----
+			// PREFIX
 			var prefix string
 			if i < len(line) && line[i] == ':' {
 				j := strings.IndexByte(line[i:], ' ')
@@ -53,7 +52,7 @@ func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ir
 				i += j + 1
 			}
 
-			// ---- COMMAND (required) ----
+			// COMMAND
 			if i >= len(line) {
 				lg.Debug("skip malformed", "reason", "missing command")
 				continue
@@ -67,7 +66,7 @@ func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ir
 				i += j + 1
 			}
 
-			// ---- PARAMS / TRAILING (optional) ----
+			// PARAMS / TRAILING
 			var params []string
 			var trailing string
 			if i <= len(line) {
@@ -87,7 +86,7 @@ func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ir
 				"trailing_len", len(trailing),
 			)
 
-			// ---- COMMAND HANDLERS (minimal) ----
+			// COMMAND HANDLERS
 			switch command {
 			case "PRIVMSG":
 				if len(params) == 0 || len(trailing) == 0 {
@@ -116,6 +115,7 @@ func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ir
 					Text:         trailing,
 				}
 
+				// debug print
 				// fmt.Println(userID, trailing)
 
 				select {
@@ -132,7 +132,7 @@ func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ir
 
 				userLogin := strings.ToLower(loginFromPrefix(prefix))
 				if userLogin == "" {
-					// no prefix → can’t attribute; ignore
+					// no prefix, can’t attribute, ignore
 					continue
 				}
 
@@ -169,7 +169,7 @@ func ClassifyLine(ctx context.Context, readerCh <-chan string, parseCh chan<- ir
 
 func fieldsNoEmpty(s string) []string {
 	parts := strings.Fields(s)
-	// strings.Fields already drops empties; keep as a separate helper for clarity/extensibility.
+	// strings.Fields already drops empties
 	return parts
 }
 
@@ -186,7 +186,6 @@ func loginFromPrefix(prefix string) string {
 }
 
 // tagsStr is everything after '@' up to the first space.
-// Example: "badge-info=subscriber/10;badges=subscriber/9;color=#00FF7F;user-id=464309918"
 func parseTags(tagsStr string) map[string]string {
 	tags := make(map[string]string, 16)
 	if tagsStr == "" {
@@ -201,7 +200,6 @@ func parseTags(tagsStr string) map[string]string {
 			v := pair[eq+1:]
 			tags[k] = unescapeIRCv3(v)
 		} else {
-			// "flagOnly" tags are allowed by spec; store as "1"
 			tags[pair] = "1"
 		}
 	}
@@ -210,7 +208,7 @@ func parseTags(tagsStr string) map[string]string {
 
 // IRCv3 tag value escapes: \s (space), \: (:), \; (;), \\ (\), \r, \n
 func unescapeIRCv3(s string) string {
-	// Fast path: nothing to unescape
+	// nothing to unescape
 	if !strings.Contains(s, "\\") {
 		return s
 	}
@@ -236,7 +234,7 @@ func unescapeIRCv3(s string) string {
 		case 'n':
 			b.WriteByte('\n')
 		default:
-			// Unknown escape: keep as-is (spec is small; this is safe)
+			// Unknown escape: keep as-is
 			b.WriteByte('\\')
 			b.WriteByte(s[i])
 		}

@@ -28,15 +28,13 @@ type Controller struct {
 	lg              *slog.Logger
 }
 
-// snapshot is the immutable read view returned to readers.
 type snapshot struct {
 	Version   uint64
 	Account   string
 	UpdatedAt time.Time
-	Channels  []string // normalized, sorted, no '#'? (we keep '#', Twitch-style)
+	Channels  []string
 }
 
-// NewController loads or initializes channels.json, validates account, and returns a controller.
 func NewController(path string, expectedAccount string, controlCh <-chan types.IRCCommand) (*Controller, error) {
 	lg := observe.
 		C("channelrecord").
@@ -59,7 +57,6 @@ func NewController(path string, expectedAccount string, controlCh <-chan types.I
 		lg:              lg,
 	}
 
-	// Load existing file if present; otherwise create an empty set for this account.
 	onDisk, err := loadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("channelrecord: load channels file %q: %w", path, err)
@@ -124,7 +121,6 @@ func (c *Controller) Run(ctx context.Context) error {
 			return ctx.Err()
 
 		case cmd := <-c.controlCh:
-			// Normalize channel key
 			ch, ok := normalizeChannel(cmd.Channel)
 			if !ok {
 				lg.Debug("dropping invalid command", "op", cmd.Op, "raw_channel", cmd.Channel)
@@ -164,11 +160,9 @@ func (c *Controller) Run(ctx context.Context) error {
 					Channels:  setToSortedSlice(desired),
 				}
 
-				// Persist first; if it fails, surface error (let supervisor restart).
 				if err := c.writeFile(newSnap); err != nil {
 					return err
 				}
-				// Publish new snapshot for readers.
 				c.writeSnap(newSnap)
 				c.nonBlockingNotify()
 				lg.Info("persisted snapshot", "version", version, "channels", len(newSnap.Channels))
@@ -190,8 +184,6 @@ func (c *Controller) Updates() <-chan struct{} {
 	return c.updatesCh
 }
 
-// --------------- helpers ---------------
-
 func (c *Controller) readSnap() snapshot {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -208,17 +200,14 @@ func (c *Controller) nonBlockingNotify() {
 	select {
 	case c.updatesCh <- struct{}{}:
 	default:
-		// drop if full; it's just a ping
+		// drop if full
 	}
 }
 
 func normalizeChannel(raw string) (string, bool) {
-	// Trim, lowercase, ensure leading '#'
 	if raw == "" {
 		return "", false
 	}
-	// minimal normalization — you can extend with stricter validation if desired
-	// strip spaces
 	var s string
 	for i := 0; i < len(raw); i++ {
 		if raw[i] != ' ' && raw[i] != '\t' && raw[i] != '\n' && raw[i] != '\r' {
@@ -229,7 +218,7 @@ func normalizeChannel(raw string) (string, bool) {
 	if s == "" {
 		return "", false
 	}
-	// lowercase
+
 	b := make([]byte, 0, len(s)+1)
 	for i := 0; i < len(s); i++ {
 		ch := s[i]

@@ -28,7 +28,7 @@ func TestIndexRendersAuthLink(t *testing.T) {
 
 func TestCallbackMissingCode(t *testing.T) {
 	t.Setenv("TOKENS_PATH", os.TempDir()+"/token.json")
-	req := httptest.NewRequest("GET", "/callback", nil) // no code
+	req := httptest.NewRequest("GET", "/callback", nil)
 	w := httptest.NewRecorder()
 
 	Callback(w, req)
