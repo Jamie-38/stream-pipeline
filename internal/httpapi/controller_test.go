@@ -53,3 +53,42 @@ func TestJoinMissingParam(t *testing.T) {
 		t.Fatal("should not enqueue on error")
 	}
 }
+
+func TestPartEnqueuesLowercasedHashChannel(t *testing.T) {
+	ch := make(chan types.IRCCommand, 1)
+	api := &APIController{ControlCh: ch, lg: observe.C("httpapi_test")}
+
+	req := httptest.NewRequest("GET", "/part?channel=Chess", nil)
+	w := httptest.NewRecorder()
+
+	api.Part(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	select {
+	case cmd := <-ch:
+		if cmd.Op != "PART" || cmd.Channel != "#chess" {
+			t.Fatalf("enqueued = %+v, want PART #chess", cmd)
+		}
+	default:
+		t.Fatal("no command enqueued")
+	}
+}
+
+func TestPartMissingParam(t *testing.T) {
+	ch := make(chan types.IRCCommand, 1)
+	api := &APIController{ControlCh: ch, lg: observe.C("httpapi_test")}
+
+	req := httptest.NewRequest("GET", "/part", nil)
+	w := httptest.NewRecorder()
+
+	api.Part(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+	if len(ch) != 0 {
+		t.Fatal("should not enqueue on error")
+	}
+}

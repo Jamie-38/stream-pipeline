@@ -35,7 +35,6 @@ func (d *desiredStub) Snapshot() (uint64, []string, time.Time, string) {
 func (d *desiredStub) Updates() <-chan struct{} { return d.updates }
 
 // test
-
 func TestRectifier_JoinRetryAndConfirm(t *testing.T) {
 	start := time.Unix(1_700_000_000, 0)
 	clk := newFakeClock(start)
@@ -113,5 +112,57 @@ func TestRectifier_JoinRetryAndConfirm(t *testing.T) {
 	st = r.state["#chess"]
 	if st.phase != Joined {
 		t.Fatalf("expected phase=Joined after membership event, got %v", st.phase)
+	}
+}
+
+func TestRectifier_PartConfirmResetsHave(t *testing.T) {
+	start := time.Unix(1_700_000_000, 0)
+	clk := newFakeClock(start)
+
+	cfg := NewDefaultConfig()
+	cfg.TokensPerSecond = 100
+	cfg.Burst = 10
+	cfg.JoinTimeout = 2 * time.Second
+	cfg.BackoffMin = 1 * time.Second
+	cfg.BackoffMax = 4 * time.Second
+	cfg.Tick = 200 * time.Millisecond
+
+	// Desired empty; we "have" a channel initially -> rectifier should PART it.
+	ds := newDesiredStub("me", []string{}, clk.Now())
+	events := make(chan types.MembershipEvent, 4)
+	out := make(chan types.IRCCommand, 4)
+
+	r := &reconciler{
+		desired:      ds,
+		events:       events,
+		out:          out,
+		cfg:          cfg,
+		state:        make(map[string]*chanState),
+		tokenBucket:  newBucket(cfg.TokensPerSecond, cfg.Burst, clk),
+		lastDesiredV: 0,
+		lg:           observe.C("rectifier_test"),
+		clk:          clk,
+	}
+
+	// Pretend we were joined already.
+	s := r.ensure("#chess")
+	s.want = false
+	s.have = true
+	s.phase = Joined
+
+	r.reconcile(clk.Now())
+	select {
+	case cmd := <-out:
+		if cmd.Op != "PART" || cmd.Channel != "#chess" {
+			t.Fatalf("expected PART #chess, got %+v", cmd)
+		}
+	default:
+		t.Fatalf("expected a PART command to be emitted")
+	}
+
+	// Simulate PART confirmation
+	r.observeEvent(types.MembershipEvent{Op: "PART", Channel: "#chess"})
+	if st := r.state["#chess"]; st == nil || st.have {
+		t.Fatalf("expected have=false after PART confirm, got %+v", st)
 	}
 }

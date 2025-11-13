@@ -178,7 +178,17 @@ func (r *reconciler) observeEvent(evt types.MembershipEvent) {
 			s.phase = Joined
 			r.lg.Info("join confirmed", "channel", ch)
 		}
-
+	case "PART":
+		ch := strings.ToLower(evt.Channel)
+		if !strings.HasPrefix(ch, "#") {
+			ch = "#" + ch
+		}
+		s := r.ensure(ch)
+		if s.have {
+			s.have = false
+			s.phase = Idle
+			r.lg.Info("part confirmed", "channel", ch)
+		}
 	default:
 		// ignore
 	}

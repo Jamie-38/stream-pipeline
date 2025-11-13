@@ -31,7 +31,8 @@ func main() {
 
 	port := os.Getenv("OAUTH_SERVER_PORT")
 	if port == "" {
-		port = "8080"
+		lg.Error("missing required env var", "name", "OAUTH_SERVER_PORT")
+		os.Exit(1)
 	}
 
 	srv := &http.Server{

@@ -29,6 +29,18 @@ func (api *APIController) Join(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Queued join for channel: " + ch))
 }
 
+func (api *APIController) Part(w http.ResponseWriter, r *http.Request) {
+	ch := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("channel")))
+	if ch == "" {
+		api.lg.Warn("part request missing channel parameter", "remote", r.RemoteAddr)
+		http.Error(w, "Missing channel parameter", http.StatusBadRequest)
+		return
+	}
+	api.lg.Info("enqueue part", "channel", ch, "remote", r.RemoteAddr)
+	api.ControlCh <- types.IRCCommand{Op: "PART", Channel: "#" + ch}
+	w.Write([]byte("Queued part for channel: " + ch))
+}
+
 func Run(ctx context.Context, controlCh chan types.IRCCommand) error {
 	lg := observe.C("http_api")
 	api := &APIController{ControlCh: controlCh, lg: lg}
@@ -39,6 +51,7 @@ func Run(ctx context.Context, controlCh chan types.IRCCommand) error {
 	probe.SetNotReady()
 
 	mux.HandleFunc("/join", api.Join)
+	mux.HandleFunc("/part", api.Part)
 
 	host := strings.TrimSpace(os.Getenv("HTTP_API_HOST"))
 	if host == "" {
